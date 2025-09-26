@@ -1,8 +1,11 @@
 import { getServerSupabaseClient } from '@/lib/supabaseClient'; // Adjust path if needed
+import { requireAdminAuth } from '@/server/utils/adminAuth'
 
 const ORDERS_PER_PAGE = 15; // Number of orders to fetch per request
 
 export default async function handler(req, res) {
+    const auth = await requireAdminAuth(req)
+    if (!auth.ok) return res.status(auth.status).json(auth.body)
     if (req.method !== 'GET') {
         res.setHeader('Allow', 'GET');
         return res.status(405).json({ message: 'Method Not Allowed' });

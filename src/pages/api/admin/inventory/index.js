@@ -2,11 +2,11 @@ import sanityClient from '../../../../../sanity/lib/client';
 import supabaseAdmin from '../../../../lib/supabaseClient';
 
 import { getAllFromInventory } from '../../../../lib/db';
-import { requireAdmin } from '@/server/utils/auth'
+import { requireAdminAuth } from '@/server/utils/adminAuth'
 
 
 export default async function handler(req, res) {
-    const auth = requireAdmin(req)
+    const auth = await requireAdminAuth(req)
     if (!auth.ok) return res.status(auth.status).json(auth.body)
     if (req.method !== 'GET') {
         res.setHeader('Allow', ['GET']);

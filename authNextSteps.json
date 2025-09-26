@@ -1,0 +1,152 @@
+{
+  "name": "Supabase Auth + shadcn Admin Plan",
+  "location": "authNextSteps.json",
+  "version": 1,
+  "status": "planned",
+  "current": {
+    "phase": "Planning",
+    "step": "Plan saved; awaiting confirmation of open choices",
+    "next": "DB Setup (SQL): create profiles, approval_requests, triggers, RLS",
+    "notes": [
+      "Repo uses Next.js Pages under src/pages",
+      "Supabase client present (src/lib/supabaseClient.js)",
+      "shadcn/ui not installed yet"
+    ]
+  },
+  "goals": [
+    "Protect all /admin/* pages behind Supabase auth",
+    "Support email/password and Google sign-in",
+    "Signup creates PENDING user and notifies admins for approval",
+    "Admin Dashboard to view, approve/deny users, manage roles",
+    "Consistent professional UI with shadcn/ui dashboard templates"
+  ],
+  "stack": {
+    "auth": "Supabase Auth (email/password + Google)",
+    "session": "@supabase/auth-helpers-nextjs for SSR + middleware",
+    "db": "Supabase Postgres (RLS enabled)",
+    "ui": "Tailwind + shadcn/ui dashboard layout and blocks"
+  },
+  "schema": {
+    "tables": {
+      "profiles": {
+        "columns": {
+          "id": "uuid PK references auth.users(id) on delete cascade",
+          "full_name": "text",
+          "avatar_url": "text",
+          "role": "text default 'staff' check in ('admin','staff')",
+          "status": "text default 'PENDING' check in ('PENDING','ACTIVE','DENIED')",
+          "created_at": "timestamptz default now()",
+          "updated_at": "timestamptz default now()"
+        },
+        "rls": [
+          "Enable RLS",
+          "Self: users can select/update their own basic fields (not role/status)",
+          "Admin: can select/update any row, including role/status"
+        ]
+      },
+      "approval_requests": {
+        "columns": {
+          "id": "uuid pk default gen_random_uuid()",
+          "user_id": "uuid references auth.users(id) on delete cascade",
+          "requested_at": "timestamptz default now()",
+          "decided_at": "timestamptz",
+          "decided_by": "uuid references auth.users(id)",
+          "decision": "text check in ('APPROVED','DENIED')",
+          "reason": "text"
+        },
+        "rls": [
+          "Enable RLS",
+          "Admin: can select/insert/update",
+          "Users: cannot select others' requests (optional self-select if needed)"
+        ]
+      }
+    },
+    "triggers": [
+      "On auth.users insert -> insert profiles row defaulting to PENDING",
+      "On profiles.status transition to ACTIVE -> mark last approval_requests row APPROVED (optional)"
+    ]
+  },
+  "flows": {
+    "login_password": "supabase.auth.signInWithPassword; redirect to intended admin route",
+    "login_google": "supabase.auth.signInWithOAuth({ provider: 'google' }) with optional domain restriction",
+    "signup": "supabase.auth.signUp; create approval_requests row; show pending screen",
+    "approval": "Admin approves/denies; set profiles.status; notify user",
+    "logout": "supabase.auth.signOut()"
+  },
+  "routeProtection": {
+    "middleware": "If path starts /admin and no sb-access-token -> redirect to /auth/login?next=...",
+    "ssr": "In getServerSideProps, fetch session + profiles; enforce status ACTIVE and role where needed",
+    "api": "Guard with requireAdminAuth reading profiles.role/status"
+  },
+  "pages": [
+    "/auth/login",
+    "/auth/signup",
+    "/auth/pending",
+    "/admin",
+    "/admin/approvals",
+    "/admin/users"
+  ],
+  "ui": {
+    "setup": [
+      "Install shadcn/ui and required components",
+      "Create AdminLayout (sidebar, topbar)",
+      "Use tables, dialogs, toasts, forms from shadcn blocks"
+    ],
+    "consistency": [
+      "Brand colors, spacing, type scale",
+      "Loading/skeleton states, empty states",
+      "Responsive layout"
+    ]
+  },
+  "emails": {
+    "events": [
+      "New approval request -> email admins with link",
+      "Approval granted -> email user",
+      "Approval denied -> email user"
+    ],
+    "transport": "Use existing nodemailer setup in src/pages/api/nodemailer-contact.js or provider"
+  },
+  "security": [
+    "Require email verification before approval (recommended)",
+    "Rate limit login/signup/reset endpoints",
+    "Secure cookies, SameSite=Lax/Strict",
+    "Enforce RLS for profiles and approval_requests",
+    "Only admins can change role/status"
+  ],
+  "implementationSteps": [
+    { "id": 1, "title": "Draft Supabase auth plan", "status": "completed" },
+    { "id": 2, "title": "Confirm open choices", "status": "in_progress", "details": [
+      "Consolidate roles into profiles.role (retire user_roles)?",
+      "Require email verification before approval?",
+      "Auto-approve Google users from specific domains?"
+    ] },
+    { "id": 3, "title": "DB Setup (SQL): tables, triggers, RLS", "status": "pending" },
+    { "id": 4, "title": "Auth helpers + middleware/SSR guards", "status": "pending" },
+    { "id": 5, "title": "Auth pages (login/signup/pending)", "status": "pending" },
+    { "id": 6, "title": "Install shadcn/ui + Admin layout", "status": "pending" },
+    { "id": 7, "title": "Admin pages: approvals + users", "status": "pending" },
+    { "id": 8, "title": "Emails: admin notifications + user decisions", "status": "pending" },
+    { "id": 9, "title": "QA flows + RLS validation", "status": "pending" }
+  ],
+  "sql": {
+    "profiles_create": "create table if not exists public.profiles ( id uuid primary key references auth.users(id) on delete cascade, full_name text, avatar_url text, role text not null default 'staff' check (role in ('admin','staff')), status text not null default 'PENDING' check (status in ('PENDING','ACTIVE','DENIED')), created_at timestamptz not null default now(), updated_at timestamptz not null default now() ); alter table public.profiles enable row level security;",
+    "approval_requests_create": "create table if not exists public.approval_requests ( id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, requested_at timestamptz not null default now(), decided_at timestamptz, decided_by uuid references auth.users(id), decision text check (decision in ('APPROVED','DENIED')), reason text ); alter table public.approval_requests enable row level security;",
+    "profiles_trigger_stub": "-- Trigger function to insert default profile on new auth.users; and optional updated_at maintenance"
+  },
+  "openChoices": [
+    "Retire user_roles and use profiles.role as source of truth",
+    "Require email verification pre-approval",
+    "Domain-based auto-approval for Google (optional)"
+  ],
+  "env": {
+    "required": [
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "NEXT_PUBLIC_SITE_URL",
+      "EMAIL_FROM",
+      "EMAIL_SERVER_*"
+    ]
+  }
+}
+

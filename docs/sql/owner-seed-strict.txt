@@ -1,0 +1,11 @@
+-- Strict path: keep user_id NOT NULL in public.user_roles
+-- 1) After the owner signs in once, fetch their Supabase Auth user UUID
+--    Replace owner@example.com with the real owner email
+select id, email from auth.users where lower(email) = lower('owner@example.com') limit 1;
+
+-- 2) Seed or update the owner row in public.user_roles using the fetched UUID
+--    Replace <OWNER_UUID> and owner@example.com with real values
+insert into public.user_roles (user_id, email, role)
+values ('<OWNER_UUID>', lower('owner@example.com'), 'owner')
+on conflict (email, role) do update set user_id = excluded.user_id;
+

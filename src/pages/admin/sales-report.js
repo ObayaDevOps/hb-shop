@@ -1,10 +1,7 @@
 import React from 'react';
 import Head from 'next/head';
-import {
-    Box,
-    Heading,
-    Divider,
-} from '@chakra-ui/react';
+import { Box, Heading, Divider } from '@chakra-ui/react';
+import AdminNavBar from '@/components/Admin/AdminNavBar'
 // Assuming you have some admin layout/wrapper
 // import AdminLayout from '@/components/AdminLayout';
 
@@ -17,6 +14,7 @@ const SalesReportPage = () => {
     return (
         // <AdminLayout> {/* Wrap with your admin layout if you have one */}
         <>
+            <AdminNavBar />
             <Head>
                 {/* Updated title to reflect the overview nature */}
                 <title>Admin - Sales Overview</title>
@@ -47,7 +45,4 @@ const SalesReportPage = () => {
 export default SalesReportPage;
 
 // Optional: Add authentication/authorization check if needed
-// export async function getServerSideProps(context) {
-//   // ... check if user is admin
-//   return { props: {} };
-// } 
+export { requireAdminPage as getServerSideProps } from '@/server/utils/pageGuard'

@@ -38,30 +38,30 @@ function EditInventoryItemPage() {
         if (id) {
             setLoading(true);
             setError(null);
-            fetch(`/api/admin/inventory/${id}`) // Assumes API endpoint exists
-                .then(res => {
+            (async () => {
+                try {
+                    const { getPublicSupabaseClient } = await import('@/lib/supabaseClient')
+                    const supa = getPublicSupabaseClient()
+                    const { data: { session } } = await supa.auth.getSession()
+                    const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
+                    const res = await fetch(`/api/admin/inventory/${id}`, { headers })
                     if (!res.ok) {
-                        // Check for specific error messages from API if available
-                        return res.json().then(errData => {
-                           throw new Error(errData.message || `Item not found or API error: ${res.status}`);
-                        });
+                        const errData = await res.json().catch(() => ({}))
+                        throw new Error(errData.message || `Item not found or API error: ${res.status}`)
                     }
-                    return res.json();
-                })
-                .then(data => {
+                    const data = await res.json()
                     setItem(data);
-                    // Initialize form state only after data is successfully fetched
                     setPrice(data.price ?? '');
                     setQuantity(data.quantity ?? '');
                     setMinStock(data.minStockLevel ?? '');
                     setLoading(false);
-                })
-                .catch(e => {
-                    console.error("Error fetching item:", e);
-                    setError(e.message);
-                    setLoading(false);
-                    setItem(null); // Ensure item state is null on error
-                });
+                } catch (e) {
+                    console.error('Error fetching item:', e)
+                    setError(e.message)
+                    setLoading(false)
+                    setItem(null)
+                }
+            })()
         } else {
              setLoading(false); // Don't load if ID is not present yet
         }
@@ -74,11 +74,16 @@ function EditInventoryItemPage() {
         setError(null);
 
         try {
+            const { getPublicSupabaseClient } = await import('@/lib/supabaseClient')
+            const supa = getPublicSupabaseClient()
+            const { data: { session } } = await supa.auth.getSession()
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+            }
             const response = await fetch(`/api/admin/inventory/${id}`, { // Assumes API endpoint exists
                 method: 'PUT', // Or PATCH if only sending changed fields
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: JSON.stringify({
                     // Send only the fields being edited
                     price: price === '' ? null : parseFloat(price), // Handle empty string for optional price
@@ -249,3 +254,5 @@ function EditInventoryItemPage() {
 }
 
 export default EditInventoryItemPage; 
+
+export { requireAdminPage as getServerSideProps } from '@/server/utils/pageGuard'

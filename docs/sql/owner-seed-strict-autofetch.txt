@@ -1,0 +1,19 @@
+-- Strict path helper: automatically fetch the owner's UUID from auth.users
+-- Usage: replace owner@example.com below with your real owner email, then run.
+-- Requires that the owner has signed in at least once so they exist in auth.users.
+
+do $$
+declare
+  owner_email text := lower('owner@example.com'); -- <- change this
+  owner_id uuid;
+begin
+  select id into owner_id from auth.users where lower(email) = owner_email limit 1;
+  if owner_id is null then
+    raise exception 'Owner email % not found in auth.users. Have the owner sign in once, then rerun this block.', owner_email;
+  end if;
+
+  insert into public.user_roles (user_id, email, role)
+  values (owner_id, owner_email, 'owner')
+  on conflict (email, role) do update set user_id = excluded.user_id;
+end $$;
+

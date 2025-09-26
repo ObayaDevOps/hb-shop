@@ -34,9 +34,13 @@ import {
 import { SearchIcon, CheckIcon, CloseIcon, WarningTwoIcon } from '@chakra-ui/icons';
 
 import Head from 'next/head'
+import AdminNavBar from '@/components/Admin/AdminNavBar'
+import { useRouter } from 'next/router'
+import { getPublicSupabaseClient } from '@/lib/supabaseClient'
 
 
 function AdminInventoryPage() {
+    const router = useRouter();
     const [inventory, setInventory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -53,8 +57,21 @@ function AdminInventoryPage() {
         setError(null);
         setUpdatingItems({});
         try {
-            const response = await fetch(`/api/admin/inventory${query ? `?search=${encodeURIComponent(query)}` : ''}`);
+            const supa = getPublicSupabaseClient()
+            const { data: { session } } = await supa.auth.getSession()
+            const token = session?.access_token
+            const response = await fetch(`/api/admin/inventory${query ? `?search=${encodeURIComponent(query)}` : ''}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
             if (!response.ok) {
+                if (response.status === 401) {
+                    router.replace(`/admin/login?redirect=${encodeURIComponent(router.asPath || '/admin/inventory')}`)
+                    return
+                }
+                if (response.status === 403) {
+                    router.replace('/admin/pending')
+                    return
+                }
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
@@ -99,10 +116,14 @@ function AdminInventoryPage() {
         setUpdatingItems(prev => ({ ...prev, [sanityId]: true }));
 
         try {
+            const supa = getPublicSupabaseClient()
+            const { data: { session } } = await supa.auth.getSession()
+            const token = session?.access_token
             const response = await fetch('/api/admin/inventory/update', {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 body: JSON.stringify({
                     sanityId: itemToUpdate.sanityId,
@@ -199,7 +220,9 @@ function AdminInventoryPage() {
     }, []);
 
     return (
-        <Box p={5}>
+        <Box>
+            <AdminNavBar />
+            <Box p={5}>
             <Head>
             <title>Admin Inventory Management | Little Kobe Japanese Market</title>
             <meta name="description" content="Little Kobe Japanese Market"  />
@@ -423,11 +446,16 @@ function AdminInventoryPage() {
                     )}
                 </>
             )}
+            </Box>
         </Box>
     );
 }
 
 export default AdminInventoryPage;
+
+export { } // keep ES module
+
+export { requireAdminPage as getServerSideProps } from '@/server/utils/pageGuard'
 
 // Optional: Add getServerSideProps or getStaticProps if needed for initial data fetching
 // But client-side fetching as shown is often fine for admin dashboards 

@@ -4,8 +4,11 @@ import sanityClient from '../../../../sanity/lib/client';
 
 
 import { getSalesDataForReport } from '@/server/repositories/orders';
+import { requireAdminAuth } from '@/server/utils/adminAuth'
 
 export default async function handler(req, res) {
+    const auth = await requireAdminAuth(req)
+    if (!auth.ok) return res.status(auth.status).json(auth.body)
     if (req.method !== 'GET') {
         res.setHeader('Allow', ['GET']);
         return res.status(405).json({ message: `Method ${req.method} Not Allowed` });

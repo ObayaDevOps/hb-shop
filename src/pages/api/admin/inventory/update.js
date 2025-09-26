@@ -1,9 +1,9 @@
 import { updateInventoryItem } from '@/server/repositories/inventory';
-import { requireAdmin } from '@/server/utils/auth'
+import { requireAdminAuth } from '@/server/utils/adminAuth'
 // import { verifyAdmin } from '@/lib/auth'; // TODO: Implement proper admin verification
 
 export default async function handler(req, res) {
-    const auth = requireAdmin(req)
+    const auth = await requireAdminAuth(req)
     if (!auth.ok) return res.status(auth.status).json(auth.body)
 
     if (req.method !== 'PUT') {

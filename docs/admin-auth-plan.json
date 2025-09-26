@@ -1,0 +1,224 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-09-25",
+  "summary": "Introduce gated access for /admin and /api via Supabase Google OAuth, pending-approval workflow, owner notifications, and an approvals dashboard.",
+  "goals": [
+    "Redirect any unauthenticated navigation to /admin/* and /api/* to a login page",
+    "Support Google login/signup via Supabase OAuth on the login page",
+    "On first-time signup or non-approved email, mark as pending and notify the site owner by email",
+    "Provide an owner-only dashboard to approve or revoke access",
+    "Only approved users can access admin pages and protected APIs"
+  ],
+  "nonGoals": [
+    "Implement SSO providers other than Google",
+    "Complex RBAC beyond owner and admin roles",
+    "Public API clients using redirects (we will handle browser navigations vs. programmatic fetch differently)"
+  ],
+  "architectureOverview": {
+    "authProvider": "Supabase Auth (Google OAuth)",
+    "session": "Supabase client-side session; middleware inspects cookies and/or Authorization",
+    "approvalModel": "DB-backed approvals using user_roles + admin_signup_requests",
+    "serverAccess": "Service-role Supabase client for server-only operations (APIs & middleware)",
+    "email": "Nodemailer SMTP using OWNER_EMAIL for notifications"
+  },
+  "dataModel": {
+    "tables": [
+      {
+        "name": "user_roles",
+        "fields": [
+          { "name": "user_id", "type": "uuid", "pk": false, "index": true },
+          { "name": "email", "type": "text", "index": true },
+          { "name": "role", "type": "text", "allowedValues": ["owner", "admin"] },
+          { "name": "created_at", "type": "timestamptz", "default": "now()" },
+          { "name": "updated_at", "type": "timestamptz", "default": "now()" }
+        ],
+        "constraints": [
+          "unique(email, role)",
+          "optional unique(user_id, role) when user_id available"
+        ],
+        "notes": "Owner seeded from env on first run. Existing table present; extend if needed."
+      },
+      {
+        "name": "admin_signup_requests",
+        "fields": [
+          { "name": "id", "type": "uuid", "pk": true, "default": "gen_random_uuid()" },
+          { "name": "email", "type": "text", "index": true },
+          { "name": "user_id", "type": "uuid", "nullable": true, "index": true },
+          { "name": "provider", "type": "text", "default": "google" },
+          { "name": "status", "type": "text", "allowedValues": ["pending", "approved", "rejected"], "default": "pending" },
+          { "name": "created_at", "type": "timestamptz", "default": "now()" },
+          { "name": "updated_at", "type": "timestamptz", "default": "now()" },
+          { "name": "metadata", "type": "jsonb", "nullable": true }
+        ],
+        "constraints": [
+          "unique(email) where status='pending'"
+        ],
+        "notes": "Tracks signups awaiting owner approval."
+      }
+    ],
+    "rls": {
+      "user_roles": "RLS enabled; only service-role can write; select limited to self for normal users; owner can select all via service endpoints",
+      "admin_signup_requests": "RLS enabled; insert by service endpoint; select: requester can view own pending; owner via service endpoints"
+    }
+  },
+  "env": {
+    "required": [
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "NEXT_PUBLIC_SITE_URL",
+      "OWNER_EMAIL",
+      "SMTP_HOST",
+      "SMTP_PORT",
+      "SMTP_USER",
+      "SMTP_PASS",
+      "ADMIN_EMAILS (optional bootstrap allowlist)",
+      "ADMIN_TOKEN (dev-only backdoor; omit in prod)"
+    ],
+    "supabaseGoogle": "Configure Google provider in Supabase dashboard; add authorized redirect: ${NEXT_PUBLIC_SITE_URL}/admin/login/callback"
+  },
+  "middleware": {
+    "file": "src/middleware.(ts|js)",
+    "matchers": ["/admin/:path*", "/api/:path*"],
+    "logic": [
+      "Read Supabase cookies (sb-access-token) and resolve session",
+      "If no session: redirect 307 to /admin/login for browser requests (Accept: text/html); for fetch/API return 401 JSON",
+      "If session but user not approved (no user_roles.role in ['owner','admin'] and not in ADMIN_EMAILS): redirect to /admin/pending with explanation (or 403 JSON for API)",
+      "If approved: allow request to proceed"
+    ],
+    "notes": "Keeps UX pleasant for navigations while keeping API programmatic semantics sane."
+  },
+  "loginFlow": {
+    "page": "/admin/login",
+    "actions": [
+      "Google sign-in button via supabase.auth.signInWithOAuth({ provider: 'google' })",
+      "On callback, check approval via server endpoint (/api/admin/access/status)",
+      "If approved: redirect to original destination (from query/state)",
+      "If not approved: create or upsert pending request, email OWNER_EMAIL, sign out session, and show pending message"
+    ],
+    "notes": "Preserve post-login redirect path. Handle users without verified emails by treating as not approved."
+  },
+  "apiChanges": [
+    {
+      "path": "/api/analytics/overview",
+      "change": "Protect with requireAdminAuth; handle Accept to choose redirect vs 401"
+    },
+    {
+      "path": "/api/analytics/recent-orders",
+      "change": "Protect with requireAdminAuth; handle Accept to choose redirect vs 401"
+    },
+    {
+      "path": "/api/admin/inventory/*",
+      "change": "Keep protected; ensure edit page uses Authorization header"
+    },
+    {
+      "path": "/api/admin/access/status (GET)",
+      "description": "Returns { approved: boolean, role: 'owner'|'admin'|null, pending: boolean } for current session",
+      "auth": "Requires session token (public client can call)"
+    },
+    {
+      "path": "/api/admin/access/request (POST)",
+      "description": "Create or upsert pending request; triggers email to owner",
+      "auth": "Requires session"
+    },
+    {
+      "path": "/api/admin/access/pending (GET)",
+      "description": "List pending requests for owner/dashboard",
+      "auth": "Owner only (via requireOwner)"
+    },
+    {
+      "path": "/api/admin/access/approve (POST)",
+      "body": "{ email, user_id? }",
+      "description": "Upsert user_roles with role='admin'; mark request approved; send notification to user (optional)",
+      "auth": "Owner only"
+    },
+    {
+      "path": "/api/admin/access/revoke (POST)",
+      "body": "{ email|user_id }",
+      "description": "Delete user_roles for role='admin'; send notification (optional)",
+      "auth": "Owner only"
+    }
+  ],
+  "pages": {
+    "login": "/admin/login (replace or augment current magic-link with Google button)",
+    "pending": "/admin/pending (explains approval process; offers logout)",
+    "dashboard": "/admin/access (owner-only approvals dashboard: lists pending, approved, actions Approve/Reject/Revoke)"
+  },
+  "emailNotifications": {
+    "ownerOnRequest": {
+      "trigger": "New pending request created",
+      "to": "OWNER_EMAIL",
+      "subject": "Admin access request pending approval",
+      "content": "Requester email, time, link to /admin/access with preselected user",
+      "throttle": "Suppress duplicates within N hours per email"
+    },
+    "userOnApproval": {
+      "trigger": "Owner approves user",
+      "to": "requester email",
+      "subject": "Your admin access was approved",
+      "content": "Link back to /admin",
+      "optional": true
+    }
+  },
+  "security": {
+    "middlewareHardening": [
+      "Never expose service-role key to browser",
+      "Sanitize Accept handling to avoid redirecting XHR unexpectedly",
+      "For APIs, prefer 401/403 JSON unless Accept: text/html and method is GET"
+    ],
+    "RLS": "Enable RLS on new tables; only service endpoints (server) can mutate",
+    "ownerBootstrap": "Seed owner role from OWNER_EMAIL or ADMIN_EMAILS on first approved request or at server boot",
+    "devBackdoor": "Allow ADMIN_TOKEN in non-prod only; ignore in production"
+  },
+  "migrationPlan": [
+    "Create tables and RLS policies in Supabase",
+    "Add env vars and configure Google provider",
+    "Introduce middleware (initially log-only / dry-run flag to validate behavior in staging)",
+    "Protect analytics APIs and verify existing admin flows",
+    "Build approvals dashboard and endpoints",
+    "Switch middleware to enforce redirects/blocks",
+    "Remove any legacy unprotected paths"
+  ],
+  "testing": {
+    "unit": [
+      "adminAuth utilities: owner/admin checks, Accept handling",
+      "API handlers: pending, approve, revoke"
+    ],
+    "integration": [
+      "Login -> pending -> email sent",
+      "Owner approves -> user gains access",
+      "Revocation -> access blocked, API returns 403"
+    ],
+    "e2e": [
+      "Navigate to /admin without session -> redirected to login",
+      "Login with non-approved -> pending screen",
+      "Owner dashboard approves -> subsequent login sees admin inventory",
+      "API fetch with and without approval (401 vs 200)"
+    ]
+  },
+  "acceptanceCriteria": [
+    "Unauthenticated browser navigation to /admin/* or /api/* redirects to /admin/login",
+    "Approved users can access admin pages and protected APIs",
+    "Owner receives email when a new user requests access",
+    "Owner can view pending/approved lists and approve/revoke",
+    "Revoked users immediately lose access (next request)"
+  ],
+  "tasks": [
+    { "id": "env-setup", "title": "Define env vars and Supabase Google provider", "owner": "dev", "status": "pending" },
+    { "id": "db-migrate", "title": "Create tables and RLS policies", "owner": "dev", "status": "pending" },
+    { "id": "middleware", "title": "Implement middleware for /admin and /api", "owner": "dev", "status": "pending" },
+    { "id": "api-access", "title": "Add access status/request/approve/revoke endpoints", "owner": "dev", "status": "pending" },
+    { "id": "login-ui", "title": "Add Google login flow and pending UX", "owner": "dev", "status": "pending" },
+    { "id": "owner-dashboard", "title": "Build approvals dashboard (owner-only)", "owner": "dev", "status": "pending" },
+    { "id": "email", "title": "Implement owner/user email notifications", "owner": "dev", "status": "pending" },
+    { "id": "protect-apis", "title": "Guard analytics and existing admin APIs", "owner": "dev", "status": "pending" },
+    { "id": "tests", "title": "Write unit/integration/e2e tests", "owner": "dev", "status": "pending" },
+    { "id": "rollout", "title": "Staging validation and production rollout", "owner": "devops", "status": "pending" }
+  ],
+  "openQuestions": [
+    "Should we allow multiple owners? If yes, manage via ADMIN_EMAILS list or a 'owner' role row?",
+    "Should API endpoints ever redirect for programmatic clients, or strictly 401/403 with a login URL hint?",
+    "Send approval confirmation email to the user (requires verified email)?"
+  ]
+}
+

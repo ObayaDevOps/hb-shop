@@ -1,0 +1,108 @@
+{
+  "generatedAt": "2025-09-25T00:00:00Z",
+  "repository": "hb-shop",
+  "summary": {
+    "goal": "Gate /admin and /api behind Google OAuth with pending-approval workflow, owner notifications, approvals dashboard, and secure APIs.",
+    "result": "Middleware, login updates, pending page, access control APIs, owner dashboard, and API protections implemented. DB and OAuth configuration steps provided."
+  },
+  "authStatusBefore": {
+    "login": "Magic-link OTP to /admin/inventory; no Google option.",
+    "pagesGuard": "Admin pages not route-guarded; relied on API errors.",
+    "apiGuard": "Some admin APIs protected via requireAdminAuth; analytics APIs were public.",
+    "tokenUse": "Inventory list/update passed Supabase access token; edit page did not."
+  },
+  "keyChanges": [
+    "Added Next.js middleware to protect /admin/* and /api/* with browser redirects and JSON 401/403 for programmatic calls.",
+    "Enhanced /admin/login with Google sign-in and approval check.",
+    "Added /admin/pending page for unapproved users.",
+    "Introduced access control APIs: status, request (creates pending + emails owner), list pending/approved, approve, revoke.",
+    "Secured analytics APIs with requireAdminAuth.",
+    "Fixed /admin/inventory/edit/[id] to send Authorization token.",
+    "Built owner dashboard at /admin/access to approve/revoke users.",
+    "Added mailer util for owner notifications."
+  ],
+  "files": {
+    "added": [
+      "middleware.js",
+      "src/pages/admin/pending.js",
+      "src/pages/admin/access/index.js",
+      "src/pages/api/admin/access/status.js",
+      "src/pages/api/admin/access/request.js",
+      "src/pages/api/admin/access/pending.js",
+      "src/pages/api/admin/access/approve.js",
+      "src/pages/api/admin/access/revoke.js",
+      "src/server/repositories/access.js",
+      "src/server/utils/mailer.js",
+      "src/server/utils/ownerAuth.js"
+    ],
+    "modified": [
+      "src/pages/admin/login.js",
+      "src/pages/api/analytics/overview.js",
+      "src/pages/api/analytics/recent-orders.js",
+      "src/pages/admin/inventory/edit/[id].js"
+    ],
+    "docs": [
+      "docs/admin-auth-plan.json",
+      "docs/Admin-Access-Guide.md"
+    ]
+  },
+  "plan": [
+    { "step": "Add middleware for /admin and /api", "status": "completed" },
+    { "step": "Enhance login + add pending page", "status": "completed" },
+    { "step": "Implement access control APIs", "status": "completed" },
+    { "step": "Secure analytics APIs + fixes", "status": "completed" },
+    { "step": "Build owner dashboard", "status": "completed" },
+    { "step": "Provide DB migration steps + emails", "status": "completed" }
+  ],
+  "envVariables": [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "NEXT_PUBLIC_SITE_URL",
+    "OWNER_EMAIL",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "ADMIN_EMAILS (optional)",
+    "ADMIN_TOKEN (dev-only; omit in prod)"
+  ],
+  "googleOAuthSetup": [
+    "Open Google Cloud Console → OAuth consent screen: set app info; add Authorized domains: yourdomain.com and supabase.co; keep openid, email, profile scopes.",
+    "Create Credentials → OAuth client ID → Web application.",
+    "Authorized JavaScript origins: https://yourdomain.com, https://<project-ref>.supabase.co, http://localhost:3000 (dev).",
+    "Authorized redirect URIs: https://<project-ref>.supabase.co/auth/v1/callback.",
+    "Copy Client ID and Secret into Supabase Dashboard → Auth → Providers → Google.",
+    "Set NEXT_PUBLIC_SITE_URL to your site origin (e.g., https://yourdomain.com)."
+  ],
+  "dbMigrations": [
+    "create table if not exists public.user_roles (user_id uuid, email text, role text check (role in ('owner','admin')), created_at timestamptz default now(), updated_at timestamptz default now());",
+    "create index if not exists idx_user_roles_user_id on public.user_roles(user_id);",
+    "create index if not exists idx_user_roles_email on public.user_roles(email);",
+    "create unique index if not exists uniq_user_roles_email_role on public.user_roles(email, role);",
+    "create table if not exists public.admin_signup_requests (id uuid primary key default gen_random_uuid(), email text not null, user_id uuid, provider text default 'google', status text not null default 'pending' check (status in ('pending','approved','rejected')), metadata jsonb, created_at timestamptz default now(), updated_at timestamptz default now());",
+    "create index if not exists idx_admin_signup_requests_email on public.admin_signup_requests(email);",
+    "create index if not exists idx_admin_signup_requests_status on public.admin_signup_requests(status);",
+    "create unique index if not exists uniq_admin_signup_requests_pending_email on public.admin_signup_requests(email) where status = 'pending';",
+    "create or replace function set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end $$;",
+    "drop trigger if exists set_user_roles_updated on public.user_roles; create trigger set_user_roles_updated before update on public.user_roles for each row execute function set_updated_at();",
+    "drop trigger if exists set_admin_signup_requests_updated on public.admin_signup_requests; create trigger set_admin_signup_requests_updated before update on public.admin_signup_requests for each row execute function set_updated_at();",
+    "alter table public.user_roles enable row level security;",
+    "alter table public.admin_signup_requests enable row level security;",
+    "insert into public.user_roles (email, role) values (lower('OWNER_EMAIL_GOES_HERE'), 'owner') on conflict (email, role) do nothing;"
+  ],
+  "testingChecklist": [
+    "Unauthenticated browser visit to /admin/inventory redirects to /admin/login.",
+    "Unauthenticated fetch to /api/analytics/overview returns 401 JSON.",
+    "Login with unapproved email creates pending request, emails owner, and shows /admin/pending.",
+    "Owner can view /admin/access, approve pending user; user can then access admin pages.",
+    "Revoking access blocks subsequent requests.",
+    "Edit item page loads with token and updates succeed."
+  ],
+  "openNotes": [
+    "Optional: send approval confirmation email to the user after owner approves.",
+    "Optional: add throttling on owner notifications to avoid duplicates.",
+    "Ensure SUPABASE service key is server-only; never expose to browser."
+  ]
+}
+
