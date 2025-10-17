@@ -23,6 +23,7 @@
     "@react-google-maps/api": "^2.20.6",
     "@sanity/image-url": "^1.0.2",
     "@sanity/vision": "^3.42.1",
+    "@supabase/mcp-server-supabase": "^0.5.6",
     "@supabase/supabase-js": "^2.49.4",
     "@vercel/og": "^0.6.4",
     "axios": "^1.7.2",
@@ -52,15 +53,15 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.47.2",
     "@testing-library/jest-dom": "^6.4.8",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.2",
+    "@vitejs/plugin-react": "^4.3.1",
     "@vitest/coverage-v8": "^2.0.5",
     "jsdom": "^25.0.0",
     "msw": "^2.3.5",
     "playwright": "^1.47.2",
-    "@playwright/test": "^1.47.2",
-    "vitest": "^2.0.5",
-    "@vitejs/plugin-react": "^4.3.1"
+    "vitest": "^2.0.5"
   }
 }
